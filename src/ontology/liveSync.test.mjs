@@ -20,7 +20,7 @@ test('syncOnce reads the analyst seam and builds the picture', () => {
     'ais-live-vessels': [{ mmsi: 'v1', lat: 26, lon: 56 }],
   }, { 'ais-live-vessels': false });
   const result = syncOnce(store, dm);
-  assert.deepEqual(result.synced, { flights: 1 }); // disabled layer skipped
+  assert.deepEqual(result.synced, { flights: 1, 'flights:evicted': 0 }); // disabled layer skipped
   assert.equal(result.objects, 1);
   assert.equal(store.getObject('aircraft:a1').attrs.altitudeM, 9000);
 });

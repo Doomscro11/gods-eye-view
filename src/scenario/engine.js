@@ -95,7 +95,7 @@ export function createScenarioEngine(liveStore, { rulesFactory = defaultRules } 
       const base = liveObjects.get(o.id);
       if (!base) objectDiffs.push({ objectId: o.id, change: 'added' });
       else if (base.lat !== o.lat || base.lon !== o.lon
-               || JSON.stringify(base.attrs) !== JSON.stringify(o.attrs)) {
+               || stableStringify(base.attrs) !== stableStringify(o.attrs)) {
         objectDiffs.push({ objectId: o.id, change: 'modified' });
       }
     }
@@ -115,11 +115,30 @@ export function createScenarioEngine(liveStore, { rulesFactory = defaultRules } 
    * Commit the branch: live state becomes the branch state, and the event log
    * records that a scenario was applied (auditability — the doctrine's
    * counterweight section made non-optional).
+   *
+   * Staleness guard: if the live picture moved on while the branch was open
+   * (feeds kept polling), a blind apply would silently discard those updates.
+   * Refuse unless the caller passes {force: true}; the refusal reports how
+   * many events the branch is behind so the surface can show the conflict.
    */
-  function apply(branchId) {
+  function apply(branchId, { force = false } = {}) {
     const branch = branches.get(branchId);
     if (!branch) return { ok: false, error: `unknown scenario: ${branchId}` };
+    const staleBy = liveStore.lastEventSeq() - branch.createdSeq;
+    if (staleBy > 0 && !force) {
+      return {
+        ok: false,
+        error: `live picture is ${staleBy} event(s) newer than this scenario — review or force-apply`,
+        stale: true,
+        staleBy,
+      };
+    }
     liveStore.restore(branch.store.snapshot());
+    if (staleBy > 0) {
+      liveStore.recordEvent('scenario-force-applied', {
+        scenarioId: branch.id, name: branch.name, staleBy,
+      });
+    }
     // Record the commit in live history so replay shows the decision point.
     liveStore.recordEvent('scenario-applied', {
       scenarioId: branch.id, name: branch.name, edits: branch.edits.length,
@@ -143,6 +162,14 @@ export function createScenarioEngine(liveStore, { rulesFactory = defaultRules } 
       id: b.id, name: b.name, edits: b.edits.length,
     })),
   };
+}
+
+/** Key-sorted stringify: identical attrs must not diff on key order. */
+function stableStringify(value) {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+  return `{${Object.keys(value).sort()
+    .map((k) => `${JSON.stringify(k)}:${stableStringify(value[k])}`).join(',')}}`;
 }
 
 /**

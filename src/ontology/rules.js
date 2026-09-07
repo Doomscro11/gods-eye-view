@@ -108,12 +108,19 @@ export function darkActivityRule({ gapMs = 30 * 60 * 1000, types = ['vessel', 'a
       for (const e of store.getEvents({ kind: 'upsert' })) {
         lastUpsert.set(e.objectId, e.t);
       }
-      // The newest upsert event carries the current clock reading.
-      const latestT = Math.max(0, ...store.getEvents({ kind: 'upsert' }).map((e) => e.t));
+      // The "current" clock is the newest evidence anywhere — log OR object.
+      // The ring buffer can drop old upserts, so object.updatedAt is the
+      // fallback that stops a reporting object from looking dark.
+      const latestT = Math.max(
+        0,
+        ...store.getEvents({ kind: 'upsert' }).map((e) => e.t),
+        ...store.allObjects().map((o) => o.updatedAt ?? 0),
+      );
       for (const object of store.allObjects()) {
         if (!types.includes(object.type)) continue;
-        const last = lastUpsert.get(object.id);
-        if (last === undefined || latestT - last <= gapMs) continue;
+        const hasEvidence = lastUpsert.has(object.id) || Number.isFinite(object.updatedAt);
+        const last = Math.max(lastUpsert.get(object.id) ?? -Infinity, object.updatedAt ?? -Infinity);
+        if (!hasEvidence || latestT - last <= gapMs) continue;
         out.push(alert(
           'dark-activity',
           'watch',

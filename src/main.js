@@ -34,6 +34,10 @@ import { installScopeMask } from './scopeMask.js';
 import { initFirstRunExperience } from './firstRunExperience.js';
 import { initKeySetup } from './keySetup.js';
 import { loadPhotorealisticTileset } from './mapStartup.js';
+import { createOntologyStore } from './ontology/store.js';
+import { createLiveSync, registerStandardVerbs } from './ontology/liveSync.js';
+import { initAlertsSurface } from './ontology/alertsPanel.js';
+import './ontology/alerts.css';
 
 initLogoGaze();
 
@@ -238,6 +242,31 @@ async function init() {
     }
     dataManager.buildTogglePanel(document.getElementById('data-toggles'));
     styleManager.attachDataManager(dataManager);
+
+    // Ontology decision layer: normalize feeds into objects, derive
+    // relationships, surface alerts as actionable cards, close the loop with
+    // governed verbs (track flies the camera, brief downloads the Markdown).
+    const ontologyStore = createOntologyStore();
+    const alertsSurface = initAlertsSurface({
+      rail: document.getElementById('ontology-alert-rail'),
+      briefButton: document.getElementById('brief-btn'),
+      store: ontologyStore,
+      showToast: (text) => styleManager._showToast?.(text),
+      onTrack: (object) => {
+        if (!Number.isFinite(object?.lat) || !Number.isFinite(object?.lon)) return;
+        viewer.camera.flyTo({
+          destination: Cesium.Cartesian3.fromDegrees(object.lon, object.lat, 80000),
+          duration: 1.6,
+        });
+      },
+    });
+    if (alertsSurface) {
+      registerStandardVerbs(ontologyStore, alertsSurface.verbs);
+      const ontologySync = createLiveSync(ontologyStore, dataManager, {
+        onAlerts: alertsSurface.onAlerts,
+      });
+      ontologySync.start();
+    }
 
     // Initialize deterministic scene playback for social clip capture
     const sceneDirector = new SceneDirector(viewer, styleManager, dataManager);

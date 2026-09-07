@@ -35,7 +35,13 @@ export function syncOnce(store, dataManager, { layerKeys = DEFAULT_SYNC_LAYERS }
     const mod = layer.module;
     if (typeof mod?.getAnalystRecords !== 'function') continue;
     const records = mod.getAnalystRecords() || [];
-    synced[layerKey] = store.upsertFromLayer(layerKey, records).length;
+    const upserted = store.upsertFromLayer(layerKey, records);
+    // Mark-and-sweep: records that left the feed leave the picture, or the
+    // store fills with ghosts and rules fire on stale contacts.
+    synced[layerKey] = upserted.length;
+    synced[`${layerKey}:evicted`] = store.evictAbsentFromLayer(
+      layerKey, upserted.map((o) => o.id),
+    ).length;
   }
   store.recomputeRelationships();
   return { synced, objects: store.allObjects().length };

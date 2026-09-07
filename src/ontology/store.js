@@ -161,6 +161,24 @@ export function createOntologyStore({
     return out;
   }
 
+  /**
+   * Mark-and-sweep eviction: after a layer sync, drop objects of that layer
+   * whose records no longer exist. Viewport-scoped feeds (flights) shrink
+   * constantly — without this the store accumulates ghosts and rules fire on
+   * contacts that left the picture. Evictions log reason 'feed-evicted' so
+   * replay distinguishes feed churn from scenario edits.
+   * @returns {string[]} Evicted object ids.
+   */
+  function evictAbsentFromLayer(layerKey, keepIds) {
+    const keep = new Set(keepIds);
+    const evicted = [];
+    for (const object of objects.values()) {
+      if (object.layerKey !== layerKey || keep.has(object.id)) continue;
+      if (removeObject(object.id, { reason: 'feed-evicted' })) evicted.push(object.id);
+    }
+    return evicted;
+  }
+
   function removeObject(id, { reason = 'removed' } = {}) {
     if (!objects.delete(id)) return false;
     for (const [key, rel] of relationships) {
@@ -253,7 +271,17 @@ export function createOntologyStore({
         return { ok: false, error: typeof verdict === 'string' ? verdict : 'guard refused' };
       }
     }
-    const result = action.handler(object, params, api);
+    let result;
+    try {
+      result = action.handler(object, params, api);
+    } catch (err) {
+      // The governed path must never throw past the store: log the failure
+      // in the audit trail and return it.
+      appendEvent('action', {
+        action: name, objectId, ok: false, error: String(err?.message || err),
+      });
+      return { ok: false, error: String(err?.message || err) };
+    }
     appendEvent('action', { action: name, objectId, ok: result?.ok !== false });
     return result ?? { ok: true };
   }
@@ -285,6 +313,7 @@ export function createOntologyStore({
     upsertObject,
     /** Append an audit/marker event (scenario commits, operator notes). */
     recordEvent: (kind, payload = {}) => appendEvent(kind, payload),
+    evictAbsentFromLayer,
     upsertFromLayer,
     removeObject,
     getObject: (id) => objects.get(id) ?? null,

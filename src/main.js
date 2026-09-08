@@ -39,6 +39,7 @@ import { createLiveSync, registerStandardVerbs } from './ontology/liveSync.js';
 import { initAlertsSurface } from './ontology/alertsPanel.js';
 import { coversDeriver } from './ontology/derivedFeeds.js';
 import { createDerivedFeedsRuntime } from './ontology/phase5Runtime.js';
+import { createJamZoneOverlay } from './ontology/jamZoneOverlay.js';
 import './ontology/alerts.css';
 
 initLogoGaze();
@@ -284,6 +285,10 @@ async function init() {
       // and alert rail see them.
       derivedHolder.rt = createDerivedFeedsRuntime({ store: ontologyStore });
       derivedHolder.rt.start();
+
+      // Phase 6: the flagship made visible — jam zones render as translucent
+      // severity-colored cells draped over the globe, swept when they evict.
+      createJamZoneOverlay({ viewer, store: ontologyStore });
     }
 
     // Initialize deterministic scene playback for social clip capture

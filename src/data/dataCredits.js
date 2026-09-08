@@ -67,6 +67,35 @@ export const DATA_CREDITS = [
     html: 'Earthquakes: Data courtesy of the U.S. Geological Survey',
   },
   {
+    key: 'cisa-kev',
+    html:
+      'Actively-exploited vulnerabilities: ' +
+      '<a href="https://www.cisa.gov/known-exploited-vulnerabilities-catalog" target="_blank" rel="noopener">CISA KEV Catalog</a>',
+  },
+  {
+    key: 'nasa-eonet',
+    html:
+      'Natural events: ' +
+      '<a href="https://eonet.gsfc.nasa.gov" target="_blank" rel="noopener">NASA EONET</a> ' +
+      '— Earth Observatory Natural Event Tracker',
+  },
+  {
+    key: 'noaa-swpc',
+    html:
+      'Space weather: ' +
+      '<a href="https://www.swpc.noaa.gov" target="_blank" rel="noopener">NOAA Space Weather Prediction Center</a>',
+  },
+  {
+    key: 'copernicus-cdse',
+    html:
+      'Sentinel acquisition metadata: ' +
+      '<a href="https://dataspace.copernicus.eu" target="_blank" rel="noopener">Copernicus Data Space Ecosystem</a>',
+  },
+  {
+    key: 'gps-jamming-derived',
+    html: 'GPS-interference zones: GEV analysis of public ADS-B navigation accuracy (adsb.lol, ODbL)',
+  },
+  {
     key: 'overpass',
     html:
       'Road geometry (traffic): ' +

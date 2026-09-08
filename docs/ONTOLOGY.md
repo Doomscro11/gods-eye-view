@@ -22,13 +22,26 @@ rehearsable (what-if branches never touch live state).
 
 | Module | Role |
 |---|---|
-| `src/ontology/store.js` | Typed objects (aircraft, vessel, satellite, fire, quake, installation, weather-cell, region) with stable IDs, cross-type relationships (near/inside), a governed action registry, and an append-only ring-buffered event log. Pure; clock injected. |
+| `src/ontology/store.js` | Typed objects (aircraft, vessel, satellite, fire, quake, installation, weather-cell, region; Phase 5 adds gps-jam-zone, natural-event, cyber-vuln, space-weather, imagery) with stable IDs, cross-type relationships (near/inside/covers), a governed action registry, and an append-only ring-buffered event log. Pure; clock injected. |
 | `src/ontology/adapters.js` | One-seam-at-a-time migration: ontology-backed `getRecords` for the analyst engine, selection mirroring, cross-type `nearestObjects`. |
-| `src/ontology/rules.js` | Alert rules (corridor breach, dark activity, proximity). Alerts carry WHAT / WHY / WHAT NEXT (governed actions). Pure and deterministic. |
+| `src/ontology/rules.js` | Alert rules (corridor breach, dark activity, proximity, GPS-jam exposure, space weather, KEV additions). Alerts carry WHAT / WHY / WHAT NEXT (governed actions). Pure and deterministic. |
 | `src/ontology/liveSync.js` | Reads the same `getAnalystRecords` seam the voice engine uses, keeps the store fresh, surfaces only fresh alerts, registers the standard verbs (track/annotate/brief) with host-injected handlers. |
 | `src/scenario/engine.js` | What-if branches: stage edits (upsert/remove/weather-front/corridor) on a snapshot branch, recompute rules, diff alerts and objects vs live, apply (with audit marker) or discard. |
 | `src/replay/engine.js` | Event-log replay (`stateAt`, cursor with timeline + decision markers) and anomaly detection (dark gaps, teleports, churn). |
 | `src/brief/product.js` | The operational brief: current picture + alerts + optional scenario delta → Markdown artifact for copy/download/share. |
+
+### Phase 5 — derived feeds & the orbital layer
+
+| Module | Role |
+|---|---|
+| `src/data/gpsJamming.js` | Statistical GPS-interference detection: grids raw ADS-B rows, flags cells where an unusual share of aircraft report degraded nav accuracy (NACp). GEV's own thresholds; emit `gps-jam-zone` objects with severity. |
+| `src/data/satPasses.js` | Generalized pass engine on satellite.js: `listPasses` (rise/max/set windows), `groundTrack`, `footprintAt`, `coversAt` for ANY satrec — `issPass.js` stays the voice fast path. |
+| `src/data/kevCatalog.js` / `eonetEvents.js` / `spaceWeather.js` / `sentinelCatalog.js` | Keyless public feeds: CISA KEV (`cyber-vuln`), NASA EONET (`natural-event`), NOAA SWPC (`space-weather`), Copernicus STAC acquisition metadata (`imagery`). Pure normalize + injectable fetch. |
+| `src/data/adsbRawTap.js` / `tleCatalog.js` | The derived feeds own their inputs: raw ADS-B rows (with `nac_p`) from the origin proxy, and a TTL-cached CelesTrak satrec catalog for the COVERS deriver. The big display layers stay untouched. |
+| `src/ontology/derivedFeeds.js` | `syncDerivedFeeds` (same mark-and-sweep invariants as liveSync) + `coversDeriver` — satellite footprint COVERS edges onto regions/installations/jam zones. |
+| `src/ontology/phase5Runtime.js` | Per-feed cadences (jam 1 min … KEV 6 h), fail-soft cycles, and the `getSatrecs` source for the store's relationship derivers. |
+
+New alert rules in `rules.js`: `gps-jam-exposure` (who is inside a zone right now — severity one notch below the zone's), `space-weather` (G/R/S scales at watch+; the natural-cause cross-check for jamming), `kev-recent` (newly listed actively-exploited CVEs).
 
 ## Invariants (tests enforce these)
 
@@ -38,6 +51,8 @@ rehearsable (what-if branches never touch live state).
 - Actions are **governed** — guards refuse before handlers run.
 - Scenario edits **never mutate live state** — apply/discard are explicit.
 - The log is **append-only** — replay and anomaly detection fold the same history.
+- Derived feeds **own their inputs** — no edits to the big display layers; taps are fail-soft and cache-bearing.
+- Feed objects **evict with the feed** — a zone that stops detecting leaves the picture and stops alerting.
 
 ## Wiring into the running app
 

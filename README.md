@@ -488,6 +488,28 @@ access the key-entry panel.
 a separately reviewed authentication proxy if remote access is required.
 [SECURITY.md](SECURITY.md) explains the restrictions and threat model.
 
+### 🌐 The community demo instance
+
+The repo ships a push-to-deploy public demo setup for [Fly.io](https://fly.io):
+[`fly.toml`](fly.toml) builds the [Dockerfile](Dockerfile) (always-on, 1 GB,
+HTTPS, health-checked), and [`.github/workflows/deploy-demo.yml`](.github/workflows/deploy-demo.yml)
+redeploys on every push to `main`. One-time setup:
+
+```bash
+fly auth login
+fly apps create gods-eye-view-demo   # or your own name — also update `app` in fly.toml
+fly secrets set CESIUM_ION_TOKEN=…   # optional: photorealistic 3D demo look
+fly deploy                           # then add FLY_API_TOKEN as a repo secret for CI deploys
+```
+
+⚠️ **A public demo brokers its configured keys to every visitor.** Restrict
+Cesium ion / Google keys at the provider and set quotas and billing alerts
+*before* the first deploy — the app's per-IP throttles are a second line of
+defense, not billing caps ([SECURITY.md](SECURITY.md)). And label your instance
+clearly as a **community deployment**: the upstream team is building an
+official hosted version at [Halfpixel](https://halfpixel.ai) (see
+[What's Next](#-whats-next)).
+
 ---
 
 ## 📋 Responsible & Open

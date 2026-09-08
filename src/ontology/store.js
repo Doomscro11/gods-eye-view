@@ -34,6 +34,13 @@ export const OBJECT_TYPES = Object.freeze({
   installation: { layerKeys: [], idFields: ['id'] },
   'weather-cell': { layerKeys: [], idFields: ['id'] },
   region: { layerKeys: [], idFields: ['id'] },
+  // Phase 5 derived-feed types. Layers with these keys feed the store
+  // through syncDerivedFeeds (src/ontology/derivedFeeds.js).
+  'gps-jam-zone': { layerKeys: ['gps-jamming'], idFields: ['id'] },
+  'natural-event': { layerKeys: ['eonet'], idFields: ['id'] },
+  'cyber-vuln': { layerKeys: ['cisa-kev'], idFields: ['cve', 'id'] },
+  'space-weather': { layerKeys: ['space-weather'], idFields: ['id'] },
+  imagery: { layerKeys: ['sentinel'], idFields: ['id'] },
 });
 
 /** Relationship kinds the store derives between objects. */
@@ -90,11 +97,16 @@ function nearRadiusFor(typeA, typeB, overrides) {
  * @param {() => number} [options.now] Clock, ms epoch. Defaults to Date.now.
  * @param {number} [options.eventCapacity] Ring-buffer capacity for the log.
  * @param {object} [options.nearRadiusKm] Pair overrides for NEAR derivation.
+ * @param {Array<Function>} [options.relationshipDerivers] Extra derivations
+ *   run at the end of every recomputeRelationships: `(list, setRelationship)`
+ *   where list is the positioned objects and setRelationship is the internal
+ *   edge writer. Derivers must be deterministic — replay folds them again.
  */
 export function createOntologyStore({
   now = Date.now,
   eventCapacity = DEFAULT_EVENT_CAPACITY,
   nearRadiusKm = {},
+  relationshipDerivers = [],
 } = {}) {
   /** @type {Map<string, object>} id → object */
   const objects = new Map();
@@ -227,6 +239,9 @@ export function createOntologyStore({
           });
         }
       }
+    }
+    for (const derive of relationshipDerivers) {
+      if (typeof derive === 'function') derive(list, setRelationship);
     }
     appendEvent('relationships', { count: relationships.size });
     return relationships;

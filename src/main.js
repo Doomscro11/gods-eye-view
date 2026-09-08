@@ -37,6 +37,8 @@ import { loadPhotorealisticTileset } from './mapStartup.js';
 import { createOntologyStore } from './ontology/store.js';
 import { createLiveSync, registerStandardVerbs } from './ontology/liveSync.js';
 import { initAlertsSurface } from './ontology/alertsPanel.js';
+import { coversDeriver } from './ontology/derivedFeeds.js';
+import { createDerivedFeedsRuntime } from './ontology/phase5Runtime.js';
 import './ontology/alerts.css';
 
 initLogoGaze();
@@ -246,7 +248,16 @@ async function init() {
     // Ontology decision layer: normalize feeds into objects, derive
     // relationships, surface alerts as actionable cards, close the loop with
     // governed verbs (track flies the camera, brief downloads the Markdown).
-    const ontologyStore = createOntologyStore();
+    // The Phase 5 runtime owns the derived feeds (GPS jamming, KEV, EONET,
+    // SWPC, Sentinel catalog) and the TLE tap that feeds the orbital COVERS
+    // deriver — "satellite footprint currently covers this region/jam zone"
+    // is a first-class ontology edge, recomputed with every sync. The holder
+    // breaks the construction cycle (store needs the deriver, the runtime
+    // needs the store); derivers only run during recompute, after start().
+    const derivedHolder = { rt: null };
+    const ontologyStore = createOntologyStore({
+      relationshipDerivers: [coversDeriver({ getSatrecs: () => derivedHolder.rt?.getSatrecs() ?? [] })],
+    });
     const alertsSurface = initAlertsSurface({
       rail: document.getElementById('ontology-alert-rail'),
       briefButton: document.getElementById('brief-btn'),
@@ -266,6 +277,13 @@ async function init() {
         onAlerts: alertsSurface.onAlerts,
       });
       ontologySync.start();
+
+      // Phase 5 derived feeds: GPS-jamming detection from the raw ADS-B
+      // tap, plus CISA KEV / NASA EONET / NOAA SWPC / Sentinel catalog on
+      // their own cadences — all synced into the ontology so the SAME rules
+      // and alert rail see them.
+      derivedHolder.rt = createDerivedFeedsRuntime({ store: ontologyStore });
+      derivedHolder.rt.start();
     }
 
     // Initialize deterministic scene playback for social clip capture

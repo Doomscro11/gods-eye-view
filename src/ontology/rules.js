@@ -18,6 +18,7 @@
 
 import { haversineKm } from '../data/analystEngine.js';
 import { pointInRing } from '../data/naturalEarthRegions.js';
+import { pointInJamZone } from '../data/gpsJamming.js';
 
 export const SEVERITY = Object.freeze(['info', 'watch', 'warning', 'critical']);
 
@@ -162,9 +163,113 @@ export function proximityRule({ kinds = ['near'], severity = 'info' } = {}) {
   };
 }
 
+/**
+ * GPS-jam exposure: a mover (aircraft/vessel) sits inside a detected
+ * interference cell. The zone object itself is the detector's output; this
+ * rule answers "who is IN it right now" — the decision-relevant question.
+ * Severity inherits the zone's, capped one notch lower for exposure.
+ */
+export function gpsJamExposureRule({ moverTypes = ['aircraft', 'vessel'] } = {}) {
+  const downgrade = { critical: 'warning', warning: 'watch', watch: 'watch' };
+  return {
+    id: 'gps-jam-exposure',
+    description: 'Mover inside a detected GPS-interference zone',
+    evaluate(store) {
+      const zones = store.objectsOfType('gps-jam-zone');
+      if (!zones.length) return [];
+      const movers = store.allObjects().filter(
+        (o) => moverTypes.includes(o.type)
+          && Number.isFinite(o.lat) && Number.isFinite(o.lon),
+      );
+      const out = [];
+      for (const zone of zones) {
+        for (const mover of movers) {
+          if (!pointInJamZone(zone.attrs, mover.lat, mover.lon)) continue;
+          out.push(alert(
+            'gps-jam-exposure',
+            downgrade[zone.attrs?.severity] || 'watch',
+            mover,
+            {
+              zone: zone.id,
+              zoneSeverity: zone.attrs?.severity ?? null,
+              degradedRatio: zone.attrs?.ratio ?? null,
+            },
+            availableActions(store, mover.id),
+          ));
+        }
+      }
+      return out;
+    },
+  };
+}
+
+/**
+ * Space weather: the current SWPC state object carries a severity derived
+ * from the G-scale; anything at 'watch' or worse is alertable. Geomagnetic
+ * storms degrade GNSS/HF — this is the natural-cause cross-check for the
+ * jamming detector (same symptom, different cause).
+ */
+export function spaceWeatherRule({ minSeverity = 'watch' } = {}) {
+  return {
+    id: 'space-weather',
+    description: 'Geomagnetic/radio storm conditions in progress',
+    evaluate(store) {
+      const min = SEVERITY.indexOf(minSeverity);
+      const out = [];
+      for (const object of store.objectsOfType('space-weather')) {
+        const severity = object.attrs?.severity || 'info';
+        if (SEVERITY.indexOf(severity) < min) continue;
+        out.push(alert(
+          'space-weather',
+          severity,
+          object,
+          { kp: object.attrs?.kp ?? null, G: object.attrs?.G ?? null, R: object.attrs?.R ?? null, S: object.attrs?.S ?? null },
+          availableActions(store, object.id),
+        ));
+      }
+      return out;
+    },
+  };
+}
+
+/**
+ * KEV watch: vulnerabilities newly added to the CISA known-exploited catalog
+ * are actively-exploited BY DEFINITION — the rail surfaces them as info so
+ * the brief picks them up without pretending a CVE has a lat/lon.
+ */
+export function kevRecentRule({ severity = 'info' } = {}) {
+  return {
+    id: 'kev-recent',
+    description: 'Newly listed actively-exploited vulnerability',
+    evaluate(store) {
+      return store.objectsOfType('cyber-vuln')
+        .filter((o) => o.attrs?.recentlyAdded)
+        .map((object) => alert(
+          'kev-recent',
+          severity,
+          object,
+          {
+            cve: object.attrs?.cve,
+            vendor: object.attrs?.vendor ?? null,
+            product: object.attrs?.product ?? null,
+            dueDate: object.attrs?.dueDate ?? null,
+          },
+          availableActions(store, object.id),
+        ));
+    },
+  };
+}
+
 /** The shipped rule set, in evaluation order. */
 export function defaultRules(options = {}) {
-  return [corridorBreachRule(options), proximityRule(options), darkActivityRule(options)];
+  return [
+    corridorBreachRule(options),
+    proximityRule(options),
+    darkActivityRule(options),
+    gpsJamExposureRule(options),
+    spaceWeatherRule(options),
+    kevRecentRule(options),
+  ];
 }
 
 /**

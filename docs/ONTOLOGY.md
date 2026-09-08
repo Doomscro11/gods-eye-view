@@ -40,6 +40,7 @@ rehearsable (what-if branches never touch live state).
 | `src/data/adsbRawTap.js` / `tleCatalog.js` | The derived feeds own their inputs: raw ADS-B rows (with `nac_p`) from the origin proxy, and a TTL-cached CelesTrak satrec catalog for the COVERS deriver. The big display layers stay untouched. |
 | `src/ontology/derivedFeeds.js` | `syncDerivedFeeds` (same mark-and-sweep invariants as liveSync) + `coversDeriver` — satellite footprint COVERS edges onto regions/installations/jam zones. |
 | `src/ontology/phase5Runtime.js` | Per-feed cadences (jam 1 min … KEV 6 h), fail-soft cycles, and the `getSatrecs` source for the store's relationship derivers. |
+| `src/ontology/jamZoneOverlay.js` | The flagship made visible: polls `gps-jam-zone` objects and renders each as a translucent severity-colored grid cell draped on the globe. Mark-and-sweep mirrors the ontology — an evicted zone leaves the map. |
 
 New alert rules in `rules.js`: `gps-jam-exposure` (who is inside a zone right now — severity one notch below the zone's), `space-weather` (G/R/S scales at watch+; the natural-cause cross-check for jamming), `kev-recent` (newly listed actively-exploited CVEs).
 

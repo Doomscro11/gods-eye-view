@@ -13,11 +13,19 @@ function runtimeHealthPlugin() {
         return;
       }
 
+      const snapshot = runtimeMemorySnapshot();
       const payload = {
         ok: true,
         uptimeSec: Math.round(process.uptime()),
         startedAt: new Date(startedAt).toISOString(),
-        memory: runtimeMemorySnapshot(),
+        // Preserve the original health contract (`memory.rssMiB`, etc.) for
+        // smoke tests and external probes while also exposing structured
+        // process/container accounting for OOM diagnosis.
+        memory: {
+          ...snapshot.process,
+          process: snapshot.process,
+          container: snapshot.container,
+        },
       };
 
       res.writeHead(200, {

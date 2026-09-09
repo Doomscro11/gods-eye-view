@@ -22,6 +22,7 @@
 
 import { haversineKm } from '../data/analystEngine.js';
 import { pointInRing } from '../data/naturalEarthRegions.js';
+import { spatialCandidatePairs } from './spatialIndex.js';
 
 export const OBJECT_TYPES = Object.freeze({
   aircraft: { layerKeys: ['flights', 'military'], idFields: ['icao24', 'callsign', 'id'] },
@@ -81,6 +82,14 @@ function nearRadiusFor(typeA, typeB, overrides) {
     ?? DEFAULT_NEAR_RADIUS_KM[`${typeA}:${typeB}`]
     ?? DEFAULT_NEAR_RADIUS_KM[`${typeB}:${typeA}`]
     ?? DEFAULT_NEAR_RADIUS_KM.default;
+}
+
+function maximumNearRadius(overrides) {
+  const values = [
+    ...Object.values(DEFAULT_NEAR_RADIUS_KM),
+    ...Object.values(overrides || {}),
+  ].filter((value) => Number.isFinite(value) && value > 0);
+  return values.length ? Math.max(...values) : 0;
 }
 
 function normalizedConfidence(value, fallback = null) {
@@ -222,36 +231,55 @@ export function createOntologyStore({
     const list = [...objects.values()].filter(
       (o) => Number.isFinite(o.lat) && Number.isFinite(o.lon),
     );
+
+    // Polygon membership is not safely bounded by the polygon object's anchor
+    // coordinate, so preserve exact ring semantics with a narrow O(r*n) pass.
+    // In practice r (regions/weather polygons) is tiny compared with live mover
+    // counts, while the dominant point-to-point NEAR work is indexed below.
+    const insidePairs = new Set();
     for (let i = 0; i < list.length; i += 1) {
       for (let j = i + 1; j < list.length; j += 1) {
         const a = list[i];
         const b = list[j];
-        if (a.type === b.type) continue;
-        const region = a.ring ? a : b.ring ? b : null;
+        if (a.type === b.type || (!a.ring && !b.ring)) continue;
+        const region = a.ring ? a : b;
         const point = region === a ? b : a;
-        if (region && point !== region && Number.isFinite(point.lat)
+        if (point !== region && Number.isFinite(point.lat)
             && pointInRing(region.ring, point.lat, point.lon)) {
           setRelationship(point.id, RELATIONSHIP.INSIDE, region.id, { distanceKm: 0 });
-          continue;
-        }
-        const km = nearRadiusFor(a.type, b.type, nearRadiusKm);
-        if (km <= 0) continue;
-        const distanceKm = haversineKm(a.lat, a.lon, b.lat, b.lon);
-        if (distanceKm <= km) {
-          const aMobile = MOBILE_TYPES.has(a.type);
-          const bMobile = MOBILE_TYPES.has(b.type);
-          const from = aMobile && !bMobile ? a : bMobile && !aMobile ? b : a;
-          const to = from === a ? b : a;
-          setRelationship(from.id, RELATIONSHIP.NEAR, to.id, {
-            distanceKm: Math.round(distanceKm * 10) / 10,
-          });
+          insidePairs.add(`${i}:${j}`);
         }
       }
     }
+
+    const maxRadiusKm = maximumNearRadius(nearRadiusKm);
+    const candidatePairs = spatialCandidatePairs(list, maxRadiusKm);
+    for (const [i, j] of candidatePairs) {
+      const a = list[i];
+      const b = list[j];
+      if (a.type === b.type || insidePairs.has(`${i}:${j}`)) continue;
+      const km = nearRadiusFor(a.type, b.type, nearRadiusKm);
+      if (km <= 0) continue;
+      const distanceKm = haversineKm(a.lat, a.lon, b.lat, b.lon);
+      if (distanceKm <= km) {
+        const aMobile = MOBILE_TYPES.has(a.type);
+        const bMobile = MOBILE_TYPES.has(b.type);
+        const from = aMobile && !bMobile ? a : bMobile && !aMobile ? b : a;
+        const to = from === a ? b : a;
+        setRelationship(from.id, RELATIONSHIP.NEAR, to.id, {
+          distanceKm: Math.round(distanceKm * 10) / 10,
+        });
+      }
+    }
+
     for (const derive of relationshipDerivers) {
       if (typeof derive === 'function') derive(list, setRelationship);
     }
-    appendEvent('relationships', { count: relationships.size });
+    appendEvent('relationships', {
+      count: relationships.size,
+      candidatePairs: candidatePairs.length,
+      pointObjects: list.length,
+    });
     return relationships;
   }
 

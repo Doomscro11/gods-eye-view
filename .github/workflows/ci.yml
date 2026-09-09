@@ -48,6 +48,27 @@ jobs:
       - name: Build production bundle
         run: npm run build
 
+      - name: Smoke-test production runtime
+        if: matrix.node == '24.14.0'
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run start:prod > /tmp/gev-runtime.log 2>&1 &
+          runtime_pid=$!
+          trap 'kill "$runtime_pid" 2>/dev/null || true; cat /tmp/gev-runtime.log' EXIT
+          for attempt in {1..30}; do
+            if curl --fail --silent --show-error http://127.0.0.1:4173/healthz > /tmp/gev-health.json; then
+              break
+            fi
+            if ! kill -0 "$runtime_pid" 2>/dev/null; then
+              echo "Production runtime exited before becoming healthy"
+              exit 1
+            fi
+            sleep 1
+          done
+          curl --fail --silent --show-error http://127.0.0.1:4173/healthz
+          curl --fail --silent --show-error http://127.0.0.1:4173/ > /dev/null
+
   windows-onboarding:
     name: Windows onboarding
     runs-on: windows-latest

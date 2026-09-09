@@ -121,6 +121,17 @@ npm run dev
 Open **`http://localhost:4173`**. Choose **Live Contacts**, **Space Missions**,
 **Environmental**, or **Explore Manually** from the first-run panel.
 
+### Path 3 — Docker, one command
+
+```bash
+docker build -t gods-eye-view .
+docker run --rm -p 4173:4173 gods-eye-view
+```
+
+Open **`http://localhost:4173`**. The image runs the same keyless-first dev
+server as Path 2 (its middleware doubles as the feed proxies); add optional
+keys at runtime via the **POWER UP** panel or `-e CESIUM_ION_TOKEN=…`.
+
 <details>
 <summary>Startup performance</summary>
 
@@ -279,6 +290,21 @@ Thirteen layers and map sources. **Eleven have a keyless path.** Some offer addi
 | 🔥 **Active Fires** | Live NASA FIRMS detections, trailing 24h | NASA FIRMS | 🟡 |
 | 🚀 **Space Missions** | Rolling 30-day launches with payload, stage, and recovery detail | Launch Library 2 | 🟢 (🟡 optional token raises the allowance) |
 | 🎖️ **Mapped Installations** | Viewport-bounded military-site context from community mapping — incomplete by nature, and labeled that way | OpenStreetMap | 🟢 |
+
+**Derived intelligence — computed live from the feeds above, no key, no server:**
+
+| Capability | What you get | Source |
+|---|---|---|
+| 🛰️ **GPS-Jamming Detection** | Likely GPS/GNSS interference zones on a 1° grid, rendered as severity-colored cells and raised as alerts with the affected traffic inside — derived from live navigation-accuracy degradation in ADS-B | Derived (adsb.lol) |
+| 🌋 **Natural Events** | Open wildfires, storms, and volcanic activity | NASA EONET |
+| 💥 **Exploited Vulnerabilities** | CISA Known Exploited Vulnerabilities, newest first, 7-day "recently added" alerts | CISA KEV |
+| ☀️ **Space Weather** | NOAA geomagnetic/solar-radiation/radio-blackout scales with G-scale alerts | NOAA SWPC |
+| 🛰️ **Orbital Coverage** | Satellite footprints as first-class relationships — which birds currently cover a region, installation, or jam zone | CelesTrak + satellite.js |
+| 📷 **Imagery Catalog** | Sentinel acquisition metadata for an area of interest | Copernicus Data Space |
+
+Every source, its license basis, and its attribution string is documented in
+**[DATA_SOURCES.md](DATA_SOURCES.md)** — the same strings render in the app's
+data-attribution popover.
 
 **The basemap ladder — what each tier buys you:**
 
@@ -461,6 +487,28 @@ access the key-entry panel.
 **Pinokio LAN and Cloudflare sharing remain disabled for this launcher.** Use
 a separately reviewed authentication proxy if remote access is required.
 [SECURITY.md](SECURITY.md) explains the restrictions and threat model.
+
+### 🌐 The community demo instance
+
+The repo ships a push-to-deploy public demo setup for [Fly.io](https://fly.io):
+[`fly.toml`](fly.toml) builds the [Dockerfile](Dockerfile) (always-on, 1 GB,
+HTTPS, health-checked), and [`.github/workflows/deploy-demo.yml`](.github/workflows/deploy-demo.yml)
+redeploys on every push to `main`. One-time setup:
+
+```bash
+fly auth login
+fly apps create gods-eye-view-demo   # or your own name — also update `app` in fly.toml
+fly secrets set CESIUM_ION_TOKEN=…   # optional: photorealistic 3D demo look
+fly deploy                           # then add FLY_API_TOKEN as a repo secret for CI deploys
+```
+
+⚠️ **A public demo brokers its configured keys to every visitor.** Restrict
+Cesium ion / Google keys at the provider and set quotas and billing alerts
+*before* the first deploy — the app's per-IP throttles are a second line of
+defense, not billing caps ([SECURITY.md](SECURITY.md)). And label your instance
+clearly as a **community deployment**: the upstream team is building an
+official hosted version at [Halfpixel](https://halfpixel.ai) (see
+[What's Next](#-whats-next)).
 
 ---
 

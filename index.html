@@ -46,7 +46,11 @@
     <button id="reset-globe-view" type="button" aria-label="Reset to full globe view" title="Reset camera and return to full globe view">
       <span class="material-symbols-outlined" aria-hidden="true">public</span>
     </button>
+    <button id="brief-btn" type="button" aria-label="Generate operational brief" title="Generate operational brief (current picture + alerts)">
+      <span class="material-symbols-outlined" aria-hidden="true">assignment</span>
+    </button>
   </nav>
+  <div id="ontology-alert-rail" class="ontology-alert-rail" aria-label="Live alerts" aria-live="polite"></div>
   <div id="global-loading-status" role="status" aria-live="polite" aria-atomic="true" hidden>
     <span id="global-loading-label">LOADING LIVE DATA</span>
     <span id="global-loading-detail"></span>

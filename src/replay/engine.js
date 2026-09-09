@@ -1,14 +1,10 @@
 /**
  * Replay engine — the living twin's memory.
  *
- * Doctrine (Tier 1 + Machinery/process-mining analog): the ontology's event
- * log is the record of how entities moved through states over time. Replay
- * reconstructs the picture at any timestamp by folding upsert/remove events;
- * anomaly detection reads the same log for the patterns a live glance misses
- * — gaps (dark activity), teleports (impossible movement), and churn
- * (objects flapping in and out of the picture).
- *
- * Pure and deterministic: the log in, the same reconstruction out.
+ * Replay reconstructs state by folding retained events over the ontology
+ * store's replay baseline. The baseline is advanced whenever the bounded
+ * event buffer evicts an old event, so end-of-log replay remains equal to the
+ * live ontology even after long runtimes.
  *
  * @module replay/engine
  */
@@ -16,44 +12,59 @@
 import { haversineKm } from '../data/analystEngine.js';
 
 /**
- * Reconstruct object state at time `t` by folding the event log.
- * Events carry the full object on upsert, so the fold needs no store.
- * @param {object[]} events From store.getEvents().
+ * Reconstruct object state at time `t`.
+ * @param {object[]} events Retained events from store.getEvents().
  * @param {number} t Timestamp (ms epoch).
+ * @param {object|null} baseline Optional {seq,t,objects} folded from evicted events.
  * @returns {Map<string, object>} objectId → object as of t.
  */
-export function stateAt(events, t) {
+export function stateAt(events, t, baseline = null) {
   const state = new Map();
+  const baselineSeq = Number(baseline?.seq) || 0;
+  if (baseline?.objects && (baseline.t === null || t >= baseline.t)) {
+    for (const object of baseline.objects) state.set(object.id, structuredClone(object));
+  }
   for (const e of events || []) {
-    if (e.t > t) break; // log is time-ordered
+    if (e.seq <= baselineSeq) continue;
+    if (e.t > t) break;
     if (e.kind === 'upsert' && e.object) state.set(e.objectId, e.object);
     else if (e.kind === 'remove') state.delete(e.objectId);
   }
   return state;
 }
 
-/**
- * A replay cursor: seek(t) answers the picture at t; timeline() answers the
- * span the log actually covers so a surface can bound its slider.
- */
 export function createReplayCursor(store) {
   return {
     seek(t) {
-      return [...stateAt(store.getEvents(), t).values()];
+      const baseline = store.replayBaseline?.() ?? null;
+      if (baseline?.t !== null && baseline?.t !== undefined && t < baseline.t) {
+        throw new RangeError(`replay history begins at ${baseline.t}; requested ${t}`);
+      }
+      return [...stateAt(store.getEvents(), t, baseline).values()];
     },
     timeline() {
       const events = store.getEvents();
-      if (!events.length) return { start: null, end: null, events: 0 };
-      return { start: events[0].t, end: events[events.length - 1].t, events: events.length };
+      const baseline = store.replayBaseline?.() ?? null;
+      const hasBaseline = baseline?.t !== null && baseline?.t !== undefined;
+      if (!events.length && !hasBaseline) {
+        return { start: null, end: null, events: 0, truncated: false };
+      }
+      const start = hasBaseline ? baseline.t : events[0]?.t ?? null;
+      const end = events.length ? events[events.length - 1].t : baseline.t;
+      return {
+        start,
+        end,
+        events: events.length,
+        truncated: Boolean(hasBaseline),
+        baselineSeq: baseline?.seq ?? 0,
+      };
     },
-    /** Decision points: scenario commits and other audit markers. */
     markers() {
       return store.getEvents().filter((e) => e.kind === 'scenario-applied');
     },
   };
 }
 
-/** Maximum plausible speed (km/h) by object type, for teleport detection. */
 export const MAX_PLAUSIBLE_SPEED_KMH = Object.freeze({
   aircraft: 1200,
   vessel: 70,
@@ -61,20 +72,11 @@ export const MAX_PLAUSIBLE_SPEED_KMH = Object.freeze({
   default: 2000,
 });
 
-/**
- * Detect anomalies in the event log.
- * @param {object[]} events From store.getEvents().
- * @param {object} [options]
- * @param {number} [options.gapMs] Silence longer than this = dark activity.
- * @param {number} [options.flapCount] This many remove+re-add cycles = churn.
- * @returns {object[]} Anomalies {kind, objectId, evidence}, time-sorted.
- */
 export function detectAnomalies(events, {
   gapMs = 30 * 60 * 1000,
   flapCount = 3,
 } = {}) {
   const anomalies = [];
-  /** objectId → {upserts:[{t,lat,lon,type}], removes:number} */
   const history = new Map();
   const track = (id) => {
     if (!history.has(id)) history.set(id, { upserts: [], removes: 0, type: null });
@@ -92,8 +94,6 @@ export function detectAnomalies(events, {
   }
 
   for (const [objectId, h] of history) {
-    // Dark activity: silent gaps BETWEEN reports (an object that never
-    // reported isn't dark; an object that STOPPED is).
     for (let i = 1; i < h.upserts.length; i += 1) {
       const gap = h.upserts[i].t - h.upserts[i - 1].t;
       if (gap > gapMs) {
@@ -104,7 +104,6 @@ export function detectAnomalies(events, {
           evidence: { gapMs: gap, from: h.upserts[i - 1].t, to: h.upserts[i].t },
         });
       }
-      // Teleport: implied speed between consecutive reports is implausible.
       const a = h.upserts[i - 1];
       const b = h.upserts[i];
       if (Number.isFinite(a.lat) && Number.isFinite(a.lon)
@@ -118,12 +117,15 @@ export function detectAnomalies(events, {
             kind: 'teleport',
             objectId,
             t: b.t,
-            evidence: { distanceKm: Math.round(km), impliedSpeedKmh: Math.round(speed), maxPlausibleKmh: max },
+            evidence: {
+              distanceKm: Math.round(km),
+              impliedSpeedKmh: Math.round(speed),
+              maxPlausibleKmh: max,
+            },
           });
         }
       }
     }
-    // Churn: the object flapped out of the picture repeatedly.
     if (h.removes >= flapCount) {
       anomalies.push({
         kind: 'churn',

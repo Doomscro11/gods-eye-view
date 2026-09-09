@@ -36,9 +36,10 @@ test('zoneBounds honors a non-default grid size', () => {
   assert.deepEqual(bounds, { west: 45, south: 24, east: 47, north: 26 });
 });
 
-test('zoneLabel carries severity, ratio, and counts', () => {
-  assert.equal(zoneLabel(ZONE), 'GPS JAM · critical · 73% degraded (8/11)');
-  assert.equal(zoneLabel({ id: 'x' }), 'GPS JAM · watch');
+test('zoneLabel carries indication semantics, severity, ratio, and counts', () => {
+  assert.equal(zoneLabel(ZONE), 'GNSS INTERFERENCE INDICATION · critical · 73% degraded (8/11)');
+  assert.equal(zoneLabel({ id: 'x' }), 'GNSS INTERFERENCE INDICATION · watch');
+  assert.equal(zoneLabel(null), 'GNSS INTERFERENCE INDICATION');
 });
 
 test('severity spec covers the three levels', () => {
@@ -81,10 +82,10 @@ test('overlay syncs entities from the store and sweeps evictions', () => {
   });
   assert.equal(overlay.entityCount(), 1);
   assert.equal(entities.length, 1);
+  assert.match(entities[0].name, /^GNSS INTERFERENCE INDICATION/);
   assert.equal(timers.length, 1);
   assert.equal(timers[0].ms, 15000);
 
-  // Zone evicts from the store → entity leaves the globe.
   zones = [];
   overlay.sync();
   assert.equal(overlay.entityCount(), 0);
@@ -99,6 +100,6 @@ test('overlay is fail-soft when the store throws', () => {
   };
   const store = { objectsOfType: () => { throw new Error('boom'); } };
   const overlay = createJamZoneOverlay({ viewer, store, setIntervalFn: () => 1, clearIntervalFn: () => {} });
-  assert.equal(overlay.entityCount(), 0); // logged, not thrown
+  assert.equal(overlay.entityCount(), 0);
   overlay.destroy();
 });

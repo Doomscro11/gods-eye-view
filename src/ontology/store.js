@@ -8,9 +8,8 @@
  *    RELATIONSHIPS (near, transits, threatens, covers). Surfaces — the
  *    analyst engine, context store, detection brackets, briefs — read the
  *    objects, never the raw layer arrays.
- *  - The store keeps an append-only EVENT LOG so the picture is a LIVING
- *    digital twin: state can be replayed, diffed, and branched (see
- *    src/scenario/engine.js and src/replay/engine.js).
+ *  - The store keeps a bounded EVENT LOG plus a replay baseline so the
+ *    picture remains reconstructable after old events roll out of memory.
  *  - ACTIONS are first-class (the verbs). They are declared here with their
  *    guardrails and invoked through `applyAction`, so an alert, a voice
  *    command, and a scenario edit all travel the same governed path.
@@ -24,7 +23,6 @@
 import { haversineKm } from '../data/analystEngine.js';
 import { pointInRing } from '../data/naturalEarthRegions.js';
 
-/** Object types the picture understands, and which feeds birth them. */
 export const OBJECT_TYPES = Object.freeze({
   aircraft: { layerKeys: ['flights', 'military'], idFields: ['icao24', 'callsign', 'id'] },
   vessel: { layerKeys: ['ais-live-vessels'], idFields: ['mmsi', 'name', 'id'] },
@@ -34,8 +32,6 @@ export const OBJECT_TYPES = Object.freeze({
   installation: { layerKeys: [], idFields: ['id'] },
   'weather-cell': { layerKeys: [], idFields: ['id'] },
   region: { layerKeys: [], idFields: ['id'] },
-  // Phase 5 derived-feed types. Layers with these keys feed the store
-  // through syncDerivedFeeds (src/ontology/derivedFeeds.js).
   'gps-jam-zone': { layerKeys: ['gps-jamming'], idFields: ['id'] },
   'natural-event': { layerKeys: ['eonet'], idFields: ['id'] },
   'cyber-vuln': { layerKeys: ['cisa-kev'], idFields: ['cve', 'id'] },
@@ -43,7 +39,6 @@ export const OBJECT_TYPES = Object.freeze({
   imagery: { layerKeys: ['sentinel'], idFields: ['id'] },
 });
 
-/** Relationship kinds the store derives between objects. */
 export const RELATIONSHIP = Object.freeze({
   NEAR: 'near',
   INSIDE: 'inside',
@@ -51,19 +46,16 @@ export const RELATIONSHIP = Object.freeze({
   COVERS: 'covers',
 });
 
-/** Default radii (km) for derived NEAR relationships, by type pair. */
 export const DEFAULT_NEAR_RADIUS_KM = Object.freeze({
   'aircraft:installation': 250,
   'vessel:installation': 250,
   'aircraft:weather-cell': 100,
   'vessel:weather-cell': 100,
-  'fire:region': 0, // 0 = derived via INSIDE on the region ring instead
+  'fire:region': 0,
   default: 50,
 });
 
-/** Mobile types originate relationship edges (mover → fixture). */
 const MOBILE_TYPES = new Set(['aircraft', 'vessel', 'satellite']);
-
 const DEFAULT_EVENT_CAPACITY = 5000;
 
 function stableObjectId(type, record) {
@@ -91,50 +83,49 @@ function nearRadiusFor(typeA, typeB, overrides) {
     ?? DEFAULT_NEAR_RADIUS_KM.default;
 }
 
-/**
- * Create an ontology store.
- * @param {object} [options]
- * @param {() => number} [options.now] Clock, ms epoch. Defaults to Date.now.
- * @param {number} [options.eventCapacity] Ring-buffer capacity for the log.
- * @param {object} [options.nearRadiusKm] Pair overrides for NEAR derivation.
- * @param {Array<Function>} [options.relationshipDerivers] Extra derivations
- *   run at the end of every recomputeRelationships: `(list, setRelationship)`
- *   where list is the positioned objects and setRelationship is the internal
- *   edge writer. Derivers must be deterministic — replay folds them again.
- */
 export function createOntologyStore({
   now = Date.now,
   eventCapacity = DEFAULT_EVENT_CAPACITY,
   nearRadiusKm = {},
   relationshipDerivers = [],
 } = {}) {
-  /** @type {Map<string, object>} id → object */
   const objects = new Map();
-  /** @type {Map<string, object>} "a|kind|b" → relationship */
   const relationships = new Map();
-  /** Append-only event log (ring buffer). */
   const events = [];
+  const replayBaseObjects = new Map();
   let eventSeq = 0;
+  let stateRevision = 0;
   let droppedEvents = 0;
-  /** Verb registry: name → {handler, guard} */
+  let replayBaseSeq = 0;
+  let replayBaseTime = null;
   const actions = new Map();
+
+  function foldReplayBase(event) {
+    if (event.kind === 'upsert' && event.object) {
+      replayBaseObjects.set(event.objectId, structuredClone(event.object));
+    } else if (event.kind === 'remove') {
+      replayBaseObjects.delete(event.objectId);
+    }
+    replayBaseSeq = event.seq;
+    replayBaseTime = event.t;
+  }
 
   function appendEvent(kind, payload) {
     const event = { seq: ++eventSeq, t: now(), kind, ...payload };
     events.push(event);
     if (events.length > eventCapacity) {
-      events.shift();
+      const dropped = events.shift();
+      foldReplayBase(dropped);
       droppedEvents += 1;
     }
     return event;
   }
 
-  /**
-   * Insert or update one typed object. `attrs` keeps the ORIGINAL record
-   * fields so surfaces lose nothing by reading the ontology instead of the
-   * layer (lossless normalization).
-   * @returns {object|null} The stored object, or null when identity fails.
-   */
+  function markStateChanged() {
+    stateRevision += 1;
+    return stateRevision;
+  }
+
   function upsertObject(type, record, { layerKey = null } = {}) {
     if (!OBJECT_TYPES[type] || !record) return null;
     const id = record.__ontologyId || stableObjectId(type, record);
@@ -147,21 +138,17 @@ export function createOntologyStore({
       lat: Number.isFinite(record.lat) ? record.lat : existing?.lat ?? null,
       lon: Number.isFinite(record.lon) ? record.lon : existing?.lon ?? null,
       attrs: { ...existing?.attrs, ...record },
-      ring: record.ring ?? existing?.ring ?? null, // regions carry a boundary
+      ring: record.ring ?? existing?.ring ?? null,
       updatedAt: now(),
       createdAt: existing?.createdAt ?? now(),
     };
     delete object.attrs.__ontologyId;
     objects.set(id, object);
+    markStateChanged();
     appendEvent('upsert', { objectId: id, objectType: type, object });
     return object;
   }
 
-  /**
-   * Normalize a layer's record array into objects. Returns the objects so a
-   * surface can swap `getRecords(layerKey)` for `objectsForLayer(layerKey)`
-   * one seam at a time.
-   */
   function upsertFromLayer(layerKey, records) {
     const type = typeForLayerKey(layerKey);
     if (!type) return [];
@@ -173,14 +160,6 @@ export function createOntologyStore({
     return out;
   }
 
-  /**
-   * Mark-and-sweep eviction: after a layer sync, drop objects of that layer
-   * whose records no longer exist. Viewport-scoped feeds (flights) shrink
-   * constantly — without this the store accumulates ghosts and rules fire on
-   * contacts that left the picture. Evictions log reason 'feed-evicted' so
-   * replay distinguishes feed churn from scenario edits.
-   * @returns {string[]} Evicted object ids.
-   */
   function evictAbsentFromLayer(layerKey, keepIds) {
     const keep = new Set(keepIds);
     const evicted = [];
@@ -196,16 +175,11 @@ export function createOntologyStore({
     for (const [key, rel] of relationships) {
       if (rel.fromId === id || rel.toId === id) relationships.delete(key);
     }
+    markStateChanged();
     appendEvent('remove', { objectId: id, reason });
     return true;
   }
 
-  /**
-   * Recompute derived relationships from current positions and rings.
-   * Deterministic and total: relationships not re-derived are dropped, so a
-   * contact leaving a radius never leaves a stale edge behind.
-   * @returns {Map<string, object>} The rebuilt relationship set.
-   */
   function recomputeRelationships() {
     relationships.clear();
     const list = [...objects.values()].filter(
@@ -215,8 +189,7 @@ export function createOntologyStore({
       for (let j = i + 1; j < list.length; j += 1) {
         const a = list[i];
         const b = list[j];
-        if (a.type === b.type) continue; // relationships are cross-type
-        // INSIDE: point object within a region ring beats a radius guess.
+        if (a.type === b.type) continue;
         const region = a.ring ? a : b.ring ? b : null;
         const point = region === a ? b : a;
         if (region && point !== region && Number.isFinite(point.lat)
@@ -228,8 +201,6 @@ export function createOntologyStore({
         if (km <= 0) continue;
         const distanceKm = haversineKm(a.lat, a.lon, b.lat, b.lon);
         if (distanceKm <= km) {
-          // Orient the edge mover → fixture so "what is near X" reads from
-          // the object that is DOING something (alert subjects, briefs).
           const aMobile = MOBILE_TYPES.has(a.type);
           const bMobile = MOBILE_TYPES.has(b.type);
           const from = aMobile && !bMobile ? a : bMobile && !aMobile ? b : a;
@@ -261,20 +232,12 @@ export function createOntologyStore({
     return out;
   }
 
-  /**
-   * Declare a verb. `guard(object, params, store)` returns true or a string
-   * explaining the refusal — guardrails live WITH the action, not in the UI.
-   */
   function defineAction(name, { handler, guard = null } = {}) {
     if (!name || typeof handler !== 'function') return false;
     actions.set(name, { handler, guard });
     return true;
   }
 
-  /**
-   * Invoke a verb through its guardrail. Every surface — alert button, voice
-   * command, scenario edit — takes this one governed path.
-   */
   function applyAction(name, { objectId = null, params = {} } = {}) {
     const action = actions.get(name);
     if (!action) return { ok: false, error: `unknown action: ${name}` };
@@ -290,8 +253,6 @@ export function createOntologyStore({
     try {
       result = action.handler(object, params, api);
     } catch (err) {
-      // The governed path must never throw past the store: log the failure
-      // in the audit trail and return it.
       appendEvent('action', {
         action: name, objectId, ok: false, error: String(err?.message || err),
       });
@@ -301,32 +262,36 @@ export function createOntologyStore({
     return result ?? { ok: true };
   }
 
-  /**
-   * Deep-enough snapshot for scenario branching: objects and relationships
-   * are plain data, so structuredClone is exact. The event log is shared
-   * history and NOT copied — a branch reads the same past, writes its own
-   * staged future (see scenario engine).
-   */
   function snapshot() {
     return {
       objects: structuredClone([...objects.values()]),
       relationships: structuredClone([...relationships.values()]),
       eventSeq,
+      stateRevision,
     };
   }
 
-  function restore(snap) {
+  function restore(snap, { markStateChange = false } = {}) {
     objects.clear();
     relationships.clear();
-    for (const object of snap.objects || []) objects.set(object.id, object);
+    for (const object of snap.objects || []) objects.set(object.id, structuredClone(object));
     for (const rel of snap.relationships || []) {
-      relationships.set(`${rel.fromId}|${rel.kind}|${rel.toId}`, rel);
+      const cloned = structuredClone(rel);
+      relationships.set(`${cloned.fromId}|${cloned.kind}|${cloned.toId}`, cloned);
     }
+    if (markStateChange) markStateChanged();
+  }
+
+  function replayBaseline() {
+    return {
+      seq: replayBaseSeq,
+      t: replayBaseTime,
+      objects: structuredClone([...replayBaseObjects.values()]),
+    };
   }
 
   const api = {
     upsertObject,
-    /** Append an audit/marker event (scenario commits, operator notes). */
     recordEvent: (kind, payload = {}) => appendEvent(kind, payload),
     evictAbsentFromLayer,
     upsertFromLayer,
@@ -350,7 +315,9 @@ export function createOntologyStore({
       (e) => e.seq > since && (!kind || e.kind === kind),
     ),
     lastEventSeq: () => eventSeq,
+    stateRevision: () => stateRevision,
     droppedEventCount: () => droppedEvents,
+    replayBaseline,
     snapshot,
     restore,
   };

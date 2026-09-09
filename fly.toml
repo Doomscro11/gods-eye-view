@@ -3,17 +3,13 @@
 # One-time setup (https://fly.io):
 #   fly auth login
 #   fly apps create gods-eye-view-demo        # or your own name — also update `app` below
-#   fly secrets set CESIUM_ION_TOKEN=…         # optional: photorealistic 3D demo look
+#   fly secrets set CESIUM_ION_TOKEN=…         # optional provider credential
 #   fly deploy                                 # first deploy; pushes to main take over after that
 #
 # IMPORTANT — a public demo brokers its configured keys to every visitor:
-# restrict CESIUM_ION_TOKEN/GOOGLE_MAPS_API_KEY at the provider and set
-# quotas/budget alerts BEFORE deploying. Provider Settings disables itself
-# on shared instances, and the in-app per-IP throttles (GEV_RATELIMIT_*)
-# are a second line of defense, not billing caps — see SECURITY.md.
-#
-# Label the instance clearly as a community deployment: the upstream project
-# is building its own official hosted version (see README "What's Next").
+# restrict provider keys at the provider and set quotas/budget alerts BEFORE
+# deploying. Provider Settings is unavailable in production preview mode on
+# shared instances; server-side provider proxies still read runtime secrets.
 
 app = "gods-eye-view-demo"
 primary_region = "iad"
@@ -21,12 +17,12 @@ primary_region = "iad"
 [build]
   dockerfile = "Dockerfile"
 
-# The Vite dev server doubles as the feed-proxy layer; it needs real memory.
+# 1 GB repeatedly OOM-killed the previous Vite dev runtime. Keep 2 GB while the
+# production-preview runtime is measured; reduce only after observed headroom.
 [[vm]]
   size = "shared-cpu-1x"
-  memory = "1gb"
+  memory = "2gb"
 
-# Always-on: a demo that cold-starts a Vite dev server per visitor is a bad demo.
 [http_service]
   internal_port = 4173
   force_https = true
@@ -39,4 +35,4 @@ primary_region = "iad"
     interval = "30s"
     method = "GET"
     timeout = "10s"
-    path = "/"
+    path = "/healthz"

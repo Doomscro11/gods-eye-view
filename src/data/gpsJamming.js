@@ -1,13 +1,17 @@
 // src/data/gpsJamming.js
 /**
- * GPS-interference detection from ADS-B navigation accuracy.
+ * GNSS-interference indication from ADS-B navigation accuracy.
  *
  * Principle: aircraft continuously broadcast how much they trust their own
- * position (NACp — Navigation Accuracy Category for Position). GNSS jamming
- * and spoofing destroy that trust, so a geographic cell where an unusual
- * share of aircraft report degraded accuracy is a candidate interference
- * zone. This is a statistical detector over public ADS-B — it cannot see a
- * jammer directly, only its footprint in the fleet's self-reported accuracy.
+ * position (NACp — Navigation Accuracy Category for Position). GNSS jamming,
+ * spoofing, receiver faults, coverage effects, and other conditions can reduce
+ * that trust. A geographic cell where an unusual share of aircraft report
+ * degraded accuracy is therefore an INTERFERENCE INDICATION, not direct proof
+ * that a jammer exists.
+ *
+ * This is a statistical detector over public ADS-B. It observes a fleet-level
+ * navigation-accuracy symptom; it does not identify an emitter or determine
+ * intent/cause by itself.
  *
  * NACp scale (0–11): higher is better; 6 = <0.3 NM, 8 = <0.05 NM.
  * NACp 0 means "accuracy unknown" — that is ABSENCE OF EVIDENCE, not
@@ -19,17 +23,19 @@
  */
 
 export const GPS_JAM_DEFAULTS = Object.freeze({
-  gridSizeDeg: 1.0,      // aggregation cell size
-  nacpDegradedMax: 6,    // NACp ≤ this (but > 0) counts as degraded
-  minRatio: 0.25,        // fraction of known-accuracy aircraft degraded to flag
-  minAircraft: 5,        // minimum known-accuracy aircraft per cell
+  gridSizeDeg: 1.0,
+  nacpDegradedMax: 6,
+  minRatio: 0.25,
+  minAircraft: 5,
 });
 
 export const JAM_ZONE_SEVERITY = Object.freeze({
   critical: { minRatio: 0.60, minDegraded: 10 },
   warning: { minRatio: 0.40, minDegraded: 5 },
-  // anything above GPS_JAM_DEFAULTS.minRatio but below warning → 'watch'
 });
+
+export const GNSS_INTERFERENCE_ASSESSMENT = 'GNSS interference indication';
+export const GNSS_INTERFERENCE_DERIVATION = 'gnss-interference-nacp-v1';
 
 /**
  * Per-aircraft nav-accuracy verdict.
@@ -55,11 +61,18 @@ export function jamZoneSeverity(ratio, degraded, severitySpec = JAM_ZONE_SEVERIT
 }
 
 /**
- * Detect candidate interference zones from raw ADS-B aircraft records.
+ * Detect candidate GNSS-interference indications from raw ADS-B aircraft records.
+ *
+ * The legacy object/id vocabulary (`gps-jam:*`, `gps-jam-zone`) is retained for
+ * API compatibility. Analyst-facing semantics are deliberately less
+ * definitive: the output is evidence of clustered navigation degradation, not
+ * proof of jamming or spoofing.
+ *
+ * Confidence is intentionally null until the detector is calibrated against
+ * known-positive/known-negative events. Severity is not a probability.
+ *
  * @param {Array<{lat:number, lon:number, nac_p?:number}>} records Raw records
- *   (adsb.lol field names; `nacP` camelCase also accepted).
- * @returns {Array<object>} Zones sorted critical-first, then by cell key:
- *   {id, cellKey, latDeg, lonDeg, gridSizeDeg, total, known, degraded, ratio, severity}
+ * @returns {Array<object>} Zones sorted critical-first, then by cell key.
  */
 export function detectGpsJamZones(records, options = {}) {
   const {
@@ -100,6 +113,17 @@ export function detectGpsJamZones(records, options = {}) {
       degraded: cell.degraded,
       ratio: Math.round(ratio * 1000) / 1000,
       severity: jamZoneSeverity(ratio, cell.degraded, options.severitySpec ?? JAM_ZONE_SEVERITY),
+      assessment: GNSS_INTERFERENCE_ASSESSMENT,
+      evidenceType: 'ads-b-nacp-cluster',
+      causeDetermined: false,
+      provenance: {
+        provider: 'ADS-B navigation accuracy observations',
+        derived: true,
+        derivation: GNSS_INTERFERENCE_DERIVATION,
+        sourceIds: [],
+        confidence: null,
+        freshness: 'live',
+      },
     });
   }
 

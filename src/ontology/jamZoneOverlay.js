@@ -1,11 +1,12 @@
 // src/ontology/jamZoneOverlay.js
 /**
- * Jam-zone globe overlay — the visible surface of the Phase 5 flagship.
+ * GNSS-interference indication globe overlay — the visible surface of the
+ * Phase 5 navigation-degradation detector.
  *
- * GPS-jam zones live in the ontology as `gps-jam-zone` objects (derived
- * every 60s by phase5Runtime). This overlay polls the store and renders each
- * zone as a translucent severity-colored grid cell draped over the globe, so
- * the detection reads on the map — not just in the alert rail.
+ * Legacy `gps-jam-zone` object/type names are retained for compatibility, but
+ * the analyst-facing surface does not assert that a jammer exists. The
+ * detector observes clustered ADS-B navigation-accuracy degradation, which is
+ * evidence consistent with interference and can have other causes.
  *
  * Split per repo convention: pure helpers (zoneBounds, zoneLabel,
  * severityColor, planZoneSync) are node-testable; createJamZoneOverlay is
@@ -47,13 +48,13 @@ export function zoneBounds(zone) {
   };
 }
 
-/** Compact readout for the entity label/description. */
+/** Compact, evidence-honest readout for the entity label/description. */
 export function zoneLabel(zone) {
-  if (!zone) return 'GPS JAM';
+  if (!zone) return 'GNSS INTERFERENCE INDICATION';
   const pct = Number.isFinite(zone.ratio) ? ` · ${Math.round(zone.ratio * 100)}% degraded` : '';
   const counts = Number.isFinite(zone.degraded) && Number.isFinite(zone.known)
     ? ` (${zone.degraded}/${zone.known})` : '';
-  return `GPS JAM · ${zone.severity || 'watch'}${pct}${counts}`;
+  return `GNSS INTERFERENCE INDICATION · ${zone.severity || 'watch'}${pct}${counts}`;
 }
 
 /**

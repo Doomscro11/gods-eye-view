@@ -42,6 +42,10 @@ jobs:
       - name: Run setup policy checks
         run: npm run doctor -- --json
 
+      - name: Validate data license policy
+        if: matrix.node == '24.14.0'
+        run: node scripts/check-license-policy.mjs
+
       - name: Run unit tests
         run: npm test
 

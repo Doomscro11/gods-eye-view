@@ -41,7 +41,10 @@
     "start:prod": "vite preview --config vite.runtime.config.mjs --host 0.0.0.0 --port 4173 --strictPort",
     "test": "node scripts/run-unit-tests.mjs",
     "test:track": "node scripts/track-regression.mjs",
-    "qa:map-source-tray": "node scripts/qa-map-source-tray.mjs"
+    "qa:map-source-tray": "node scripts/qa-map-source-tray.mjs",
+    "license:check": "node scripts/license-guard.mjs",
+    "license:manifest": "node scripts/license-guard.mjs --json",
+    "license:commercial": "node scripts/license-guard.mjs --require-commercial-ready"
   },
   "dependencies": {
     "@mapbox/vector-tile": "^3.0.0",

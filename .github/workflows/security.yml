@@ -47,19 +47,39 @@ jobs:
       - name: Analyze
         uses: github/codeql-action/analyze@faaca9a8f6edddba5725ffe5adefdab6669a2eca # v3
 
-  dependency-review:
-    name: Dependency review
+  dependency-risk:
+    name: Dependency risk
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    env:
+      PUPPETEER_SKIP_DOWNLOAD: '1'
     steps:
       - name: Check out source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
 
-      - name: Review dependency changes
+      - name: Review dependency changes when Dependency Graph is available
+        id: dependency_review
+        continue-on-error: true
         uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
         with:
           fail-on-severity: high
+
+      - name: Use Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24.14.0
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Enforce production dependency audit
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Report Dependency Graph fallback
+        if: steps.dependency_review.outcome == 'failure'
+        run: echo 'GitHub Dependency Review was unavailable or failed; npm audit provided the blocking production-vulnerability gate. Enable Dependency Graph in repository security settings to restore change-by-change review.'

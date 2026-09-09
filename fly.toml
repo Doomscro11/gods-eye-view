@@ -1,42 +1,28 @@
-# Fly.io configuration for the public community demo instance.
+# fly.toml app configuration file generated for gods-eye-view-demo on 2026-09-09T14:33:42Z
 #
-# One-time setup (https://fly.io):
-#   fly auth login
-#   fly apps create gods-eye-view-demo        # or your own name — also update `app` below
-#   fly secrets set CESIUM_ION_TOKEN=…         # optional: photorealistic 3D demo look
-#   fly deploy                                 # first deploy; pushes to main take over after that
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
-# IMPORTANT — a public demo brokers its configured keys to every visitor:
-# restrict CESIUM_ION_TOKEN/GOOGLE_MAPS_API_KEY at the provider and set
-# quotas/budget alerts BEFORE deploying. Provider Settings disables itself
-# on shared instances, and the in-app per-IP throttles (GEV_RATELIMIT_*)
-# are a second line of defense, not billing caps — see SECURITY.md.
-#
-# Label the instance clearly as a community deployment: the upstream project
-# is building its own official hosted version (see README "What's Next").
 
-app = "gods-eye-view-demo"
-primary_region = "iad"
+app = 'gods-eye-view-demo'
+primary_region = 'iad'
 
 [build]
-  dockerfile = "Dockerfile"
+  dockerfile = 'Dockerfile'
 
-# The Vite dev server doubles as the feed-proxy layer; it needs real memory.
-[[vm]]
-  size = "shared-cpu-1x"
-  memory = "1gb"
-
-# Always-on: a demo that cold-starts a Vite dev server per visitor is a bad demo.
 [http_service]
   internal_port = 4173
   force_https = true
-  auto_stop_machines = "off"
+  auto_stop_machines = 'off'
   auto_start_machines = true
   min_machines_running = 1
 
   [[http_service.checks]]
-    grace_period = "30s"
-    interval = "30s"
-    method = "GET"
-    timeout = "10s"
-    path = "/"
+    interval = '30s'
+    timeout = '10s'
+    grace_period = '30s'
+    method = 'GET'
+    path = '/'
+
+[[vm]]
+  size = 'shared-cpu-1x'
+  memory = '1gb'

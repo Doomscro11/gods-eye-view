@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   generate:
-    name: CycloneDX SBOM
+    name: CycloneDX SBOM + licence manifest
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -30,13 +30,21 @@ jobs:
       - name: Install locked dependencies
         run: npm ci
 
+      - name: Verify third-party licence notices
+        run: npm run license:check
+
       - name: Generate CycloneDX SBOM
         run: npm sbom --sbom-format cyclonedx > sbom.cdx.json
 
-      - name: Upload SBOM
+      - name: Generate data/provider licence manifest
+        run: npm run license:manifest > data-license-manifest.json
+
+      - name: Upload manifests
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: sbom-cyclonedx
-          path: sbom.cdx.json
+          name: supply-chain-manifests
+          path: |
+            sbom.cdx.json
+            data-license-manifest.json
           if-no-files-found: error
           retention-days: 30

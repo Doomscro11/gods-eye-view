@@ -83,6 +83,35 @@ function nearRadiusFor(typeA, typeB, overrides) {
     ?? DEFAULT_NEAR_RADIUS_KM.default;
 }
 
+function normalizedConfidence(value, fallback = null) {
+  if (value === null || value === undefined || value === '') return fallback;
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  return Math.max(0, Math.min(1, numeric));
+}
+
+function normalizeProvenance(record, {
+  layerKey = null,
+  existing = null,
+  ingestedAt = null,
+} = {}) {
+  const raw = record?.provenance ?? record?.__provenance ?? {};
+  const sourceIds = Array.isArray(raw.sourceIds)
+    ? [...new Set(raw.sourceIds.map((value) => String(value)).filter(Boolean))]
+    : existing?.sourceIds ?? [];
+  return {
+    provider: raw.provider ?? record?.provider ?? layerKey ?? existing?.provider ?? null,
+    observedAt: raw.observedAt ?? record?.observedAt ?? record?.timestamp ?? existing?.observedAt ?? null,
+    ingestedAt,
+    derived: Boolean(raw.derived ?? existing?.derived ?? false),
+    derivation: raw.derivation ?? existing?.derivation ?? null,
+    sourceIds,
+    confidence: normalizedConfidence(raw.confidence ?? record?.confidence, existing?.confidence ?? null),
+    freshness: raw.freshness ?? existing?.freshness ?? 'live',
+    license: raw.license ?? existing?.license ?? null,
+  };
+}
+
 export function createOntologyStore({
   now = Date.now,
   eventCapacity = DEFAULT_EVENT_CAPACITY,
@@ -131,18 +160,26 @@ export function createOntologyStore({
     const id = record.__ontologyId || stableObjectId(type, record);
     if (!id) return null;
     const existing = objects.get(id);
+    const effectiveLayerKey = layerKey ?? existing?.layerKey ?? null;
+    const updatedAt = now();
     const object = {
       id,
       type,
-      layerKey: layerKey ?? existing?.layerKey ?? null,
+      layerKey: effectiveLayerKey,
       lat: Number.isFinite(record.lat) ? record.lat : existing?.lat ?? null,
       lon: Number.isFinite(record.lon) ? record.lon : existing?.lon ?? null,
       attrs: { ...existing?.attrs, ...record },
       ring: record.ring ?? existing?.ring ?? null,
-      updatedAt: now(),
-      createdAt: existing?.createdAt ?? now(),
+      provenance: normalizeProvenance(record, {
+        layerKey: effectiveLayerKey,
+        existing: existing?.provenance,
+        ingestedAt: updatedAt,
+      }),
+      updatedAt,
+      createdAt: existing?.createdAt ?? updatedAt,
     };
     delete object.attrs.__ontologyId;
+    delete object.attrs.__provenance;
     objects.set(id, object);
     markStateChanged();
     appendEvent('upsert', { objectId: id, objectType: type, object });

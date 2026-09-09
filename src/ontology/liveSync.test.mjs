@@ -20,9 +20,42 @@ test('syncOnce reads the analyst seam and builds the picture', () => {
     'ais-live-vessels': [{ mmsi: 'v1', lat: 26, lon: 56 }],
   }, { 'ais-live-vessels': false });
   const result = syncOnce(store, dm);
-  assert.deepEqual(result.synced, { flights: 1, 'flights:evicted': 0 }); // disabled layer skipped
+  assert.deepEqual(result.synced, { flights: 1, 'flights:evicted': 0 }); // disabled layer had no prior objects
   assert.equal(result.objects, 1);
   assert.equal(store.getObject('aircraft:a1').attrs.altitudeM, 9000);
+});
+
+test('syncOnce evicts objects when a source layer becomes disabled', () => {
+  const store = createOntologyStore({ now: () => 1000 });
+  const enabled = { flights: true };
+  const dm = fakeDataManager({
+    flights: [{ icao24: 'a1', lat: 30, lon: -97, altitudeM: 9000 }],
+  }, enabled);
+
+  let result = syncOnce(store, dm, { layerKeys: ['flights'] });
+  assert.equal(result.objects, 1);
+  assert.ok(store.getObject('aircraft:a1'));
+
+  enabled.flights = false;
+  result = syncOnce(store, dm, { layerKeys: ['flights'] });
+  assert.equal(result.synced['flights:evicted'], 1);
+  assert.equal(result.objects, 0);
+  assert.equal(store.getObject('aircraft:a1'), null);
+});
+
+test('syncOnce evicts objects when a source layer disappears', () => {
+  const store = createOntologyStore({ now: () => 1000 });
+  const dm = fakeDataManager({
+    flights: [{ icao24: 'a1', lat: 30, lon: -97, altitudeM: 9000 }],
+  });
+
+  syncOnce(store, dm, { layerKeys: ['flights'] });
+  assert.ok(store.getObject('aircraft:a1'));
+
+  dm.layers.delete('flights');
+  const result = syncOnce(store, dm, { layerKeys: ['flights'] });
+  assert.equal(result.synced['flights:evicted'], 1);
+  assert.equal(result.objects, 0);
 });
 
 test('live sync surfaces only fresh alerts to the host', () => {

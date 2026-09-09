@@ -23,17 +23,31 @@ export const DEFAULT_SYNC_LAYERS = ONTOLOGY_BACKED_LAYERS;
 
 /**
  * Pull one sync cycle: read each enabled layer's analyst records and upsert
- * them into the store, then recompute relationships. Pure enough to drive
- * with a fake dataManager in tests.
+ * them into the store, then recompute relationships. Disabled or unavailable
+ * layers are also swept so the ontology cannot retain ghosts from a source
+ * that is no longer part of the active picture.
+ * Pure enough to drive with a fake dataManager in tests.
  * @returns {object} {synced: {layerKey: count}, objects: total}
  */
 export function syncOnce(store, dataManager, { layerKeys = DEFAULT_SYNC_LAYERS } = {}) {
   const synced = {};
   for (const layerKey of layerKeys) {
     const layer = dataManager?.layers?.get?.(layerKey);
-    if (!layer || !dataManager.isEnabled(layerKey)) continue;
+    const enabled = Boolean(layer) && dataManager?.isEnabled?.(layerKey) !== false;
+
+    if (!enabled) {
+      const evicted = store.evictAbsentFromLayer(layerKey, []);
+      if (evicted.length) synced[`${layerKey}:evicted`] = evicted.length;
+      continue;
+    }
+
     const mod = layer.module;
-    if (typeof mod?.getAnalystRecords !== 'function') continue;
+    if (typeof mod?.getAnalystRecords !== 'function') {
+      const evicted = store.evictAbsentFromLayer(layerKey, []);
+      if (evicted.length) synced[`${layerKey}:evicted`] = evicted.length;
+      continue;
+    }
+
     const records = mod.getAnalystRecords() || [];
     const upserted = store.upsertFromLayer(layerKey, records);
     // Mark-and-sweep: records that left the feed leave the picture, or the

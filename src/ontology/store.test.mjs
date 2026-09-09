@@ -19,8 +19,58 @@ test('upsertFromLayer normalizes feeds into typed objects with stable ids', () =
   assert.equal(aircraft[0].id, 'aircraft:abc123');
   assert.equal(aircraft[0].layerKey, 'flights');
   assert.equal(aircraft[0].attrs.altitudeM, 9000); // lossless attrs
+  assert.equal(aircraft[0].provenance.provider, 'flights');
+  assert.equal(aircraft[0].provenance.ingestedAt, 1000);
+  assert.equal(aircraft[0].provenance.derived, false);
+  assert.equal(aircraft[0].provenance.freshness, 'live');
   // Second record falls back to the next identity field.
   assert.equal(aircraft[1].id, 'aircraft:NOID');
+});
+
+test('provenance is first-class, confidence is bounded, and source ids are de-duplicated', () => {
+  const store = makeStore();
+  const object = store.upsertObject('aircraft', {
+    icao24: 'prov1',
+    lat: 35,
+    lon: -95,
+    provenance: {
+      provider: 'adsb.lol',
+      observedAt: '2026-09-09T15:00:00Z',
+      derived: true,
+      derivation: 'gnss-interference-v1',
+      sourceIds: ['aircraft:a', 'aircraft:a', 42],
+      confidence: 1.4,
+      freshness: 'live',
+      license: 'provider-terms',
+    },
+  });
+
+  assert.deepEqual(object.provenance, {
+    provider: 'adsb.lol',
+    observedAt: '2026-09-09T15:00:00Z',
+    ingestedAt: 1000,
+    derived: true,
+    derivation: 'gnss-interference-v1',
+    sourceIds: ['aircraft:a', '42'],
+    confidence: 1,
+    freshness: 'live',
+    license: 'provider-terms',
+  });
+});
+
+test('later observations preserve provenance fields that are not re-supplied', () => {
+  let t = 1000;
+  const store = makeStore(() => t);
+  store.upsertObject('aircraft', {
+    icao24: 'prov2', lat: 1, lon: 1,
+    provenance: { provider: 'opensky', confidence: 0.73, observedAt: 900 },
+  });
+  t = 2000;
+  const updated = store.upsertObject('aircraft', { icao24: 'prov2', lat: 2, lon: 2 });
+  assert.equal(updated.provenance.provider, 'opensky');
+  assert.equal(updated.provenance.confidence, 0.73);
+  assert.equal(updated.provenance.observedAt, 900);
+  assert.equal(updated.provenance.ingestedAt, 2000);
 });
 
 test('every declared layer key maps to an object type', () => {

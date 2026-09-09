@@ -19,37 +19,24 @@ import { evaluateRules, defaultRules } from '../ontology/rules.js';
 
 let scenarioSeq = 0;
 
-/**
- * @param {object} liveStore The operator's live ontology store.
- * @param {object} [options]
- * @param {() => object[]} [options.rulesFactory] Rule set for both worlds.
- */
 export function createScenarioEngine(liveStore, { rulesFactory = defaultRules } = {}) {
-  /** @type {Map<string, object>} scenarioId → branch record */
   const branches = new Map();
 
-  /**
-   * Open a what-if branch. The branch reads the same past (snapshot) and
-   * writes only its own staged future.
-   * @returns {object} Branch handle {id, name, store}.
-   */
   function beginScenario(name = 'scenario') {
     const id = `scenario:${++scenarioSeq}`;
     const branchStore = createOntologyStore({ now: () => liveStoreBranchClock(liveStore) });
     branchStore.restore(liveStore.snapshot());
-    const branch = { id, name, store: branchStore, edits: [], createdSeq: liveStore.lastEventSeq() };
+    const branch = {
+      id,
+      name,
+      store: branchStore,
+      edits: [],
+      createdRevision: liveStore.stateRevision(),
+    };
     branches.set(id, branch);
     return { id, name, store: branchStore };
   }
 
-  /**
-   * Stage an edit on a branch. Edits:
-   *  - {kind:'upsert', type, record}        — add/move/hypothesize an object
-   *  - {kind:'remove', objectId}            — asset lost / feed dark
-   *  - {kind:'weather-cell', record}        — weather front staged as an object
-   *  - {kind:'corridor', record}            — watched corridor (region/installation)
-   * Live state is untouched by construction.
-   */
   function stageEdit(branchId, edit) {
     const branch = branches.get(branchId);
     if (!branch) return { ok: false, error: `unknown scenario: ${branchId}` };
@@ -76,10 +63,6 @@ export function createScenarioEngine(liveStore, { rulesFactory = defaultRules } 
     }
   }
 
-  /**
-   * Recompute relationships + rules on the branch and diff against live.
-   * @returns {object} comparison {addedAlerts, removedAlerts, objectDiffs}
-   */
   function compare(branchId, rules = rulesFactory()) {
     const branch = branches.get(branchId);
     if (!branch) return null;
@@ -111,35 +94,24 @@ export function createScenarioEngine(liveStore, { rulesFactory = defaultRules } 
     };
   }
 
-  /**
-   * Commit the branch: live state becomes the branch state, and the event log
-   * records that a scenario was applied (auditability — the doctrine's
-   * counterweight section made non-optional).
-   *
-   * Staleness guard: if the live picture moved on while the branch was open
-   * (feeds kept polling), a blind apply would silently discard those updates.
-   * Refuse unless the caller passes {force: true}; the refusal reports how
-   * many events the branch is behind so the surface can show the conflict.
-   */
   function apply(branchId, { force = false } = {}) {
     const branch = branches.get(branchId);
     if (!branch) return { ok: false, error: `unknown scenario: ${branchId}` };
-    const staleBy = liveStore.lastEventSeq() - branch.createdSeq;
+    const staleBy = liveStore.stateRevision() - branch.createdRevision;
     if (staleBy > 0 && !force) {
       return {
         ok: false,
-        error: `live picture is ${staleBy} event(s) newer than this scenario — review or force-apply`,
+        error: `live picture is ${staleBy} state revision(s) newer than this scenario — review or force-apply`,
         stale: true,
         staleBy,
       };
     }
-    liveStore.restore(branch.store.snapshot());
+    liveStore.restore(branch.store.snapshot(), { markStateChange: true });
     if (staleBy > 0) {
       liveStore.recordEvent('scenario-force-applied', {
         scenarioId: branch.id, name: branch.name, staleBy,
       });
     }
-    // Record the commit in live history so replay shows the decision point.
     liveStore.recordEvent('scenario-applied', {
       scenarioId: branch.id, name: branch.name, edits: branch.edits.length,
     });
@@ -147,7 +119,6 @@ export function createScenarioEngine(liveStore, { rulesFactory = defaultRules } 
     return { ok: true, applied: branch.name, edits: branch.edits.length };
   }
 
-  /** Discard the branch. Live state was never touched. */
   function discard(branchId) {
     return branches.delete(branchId);
   }
@@ -164,7 +135,6 @@ export function createScenarioEngine(liveStore, { rulesFactory = defaultRules } 
   };
 }
 
-/** Key-sorted stringify: identical attrs must not diff on key order. */
 function stableStringify(value) {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
   if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
@@ -172,10 +142,6 @@ function stableStringify(value) {
     .map((k) => `${JSON.stringify(k)}:${stableStringify(value[k])}`).join(',')}}`;
 }
 
-/**
- * Branch clock: scenario edits timestamp against the live store's latest
- * event so a branch never appears to come from the future of the log.
- */
 function liveStoreBranchClock(liveStore) {
   const events = liveStore.getEvents();
   return events.length ? events[events.length - 1].t : Date.now();

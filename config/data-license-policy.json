@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "sources": [
+    {
+      "id": "telegeography-submarine-cables",
+      "path": "src/data/local_data/telegeography_submarine_cables",
+      "license": "CC-BY-NC-SA-3.0",
+      "commercialAllowed": false,
+      "obligations": ["attribution", "share-alike", "non-commercial-only"],
+      "commercialAction": "remove-or-obtain-commercial-license"
+    },
+    {
+      "id": "osm-datacenters",
+      "path": "src/data/local_data/datacenters",
+      "license": "ODbL-1.0",
+      "commercialAllowed": true,
+      "obligations": ["attribution", "database-share-alike"]
+    },
+    {
+      "id": "osm-dams",
+      "path": "src/data/local_data/dams",
+      "license": "ODbL-1.0",
+      "commercialAllowed": true,
+      "obligations": ["attribution", "database-share-alike"]
+    },
+    {
+      "id": "third-party-models",
+      "path": "public/models",
+      "license": "mixed-see-public/models/README.md",
+      "commercialAllowed": null,
+      "reviewRequired": true,
+      "obligations": ["per-asset-license-review", "attribution-where-required"]
+    }
+  ]
+}

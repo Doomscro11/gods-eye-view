@@ -56,6 +56,16 @@ test('treats cgroup v2 max as unlimited', () => {
   assert.equal(result.usagePct, null);
 });
 
+test('keeps missing cgroup v2 values unknown instead of coercing them to zero', () => {
+  const result = readCgroupMemory(reader({
+    '/sys/fs/cgroup/memory.current': '1048576',
+  }));
+  assert.equal(result.version, 2);
+  assert.equal(result.currentBytes, 1048576);
+  assert.equal(result.limitBytes, null);
+  assert.equal(result.usagePct, null);
+});
+
 test('resolves a nested cgroup v1 memory controller path', () => {
   const result = readCgroupMemory(reader({
     '/proc/self/cgroup': '5:memory:/docker/abc123',

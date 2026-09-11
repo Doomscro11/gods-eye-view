@@ -13,6 +13,10 @@ function readText(readFile, filename) {
 }
 
 function finiteBytes(value) {
+  // Missing/unreadable pseudo-files must remain unknown. Number(null) and
+  // Number('') both coerce to 0, which would otherwise make absent cgroup
+  // accounting look like a real zero-byte value and corrupt headroom math.
+  if (value === null || value === undefined || value === '') return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 }

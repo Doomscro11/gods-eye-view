@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite';
 import baseConfig from './vite.config.js';
+import { runtimeMemorySnapshot } from './src/runtime/memoryTelemetry.js';
 
 const startedAt = Date.now();
 
@@ -12,17 +13,18 @@ function runtimeHealthPlugin() {
         return;
       }
 
-      const memory = process.memoryUsage();
+      const snapshot = runtimeMemorySnapshot();
       const payload = {
         ok: true,
         uptimeSec: Math.round(process.uptime()),
         startedAt: new Date(startedAt).toISOString(),
+        // Preserve the original health contract (`memory.rssMiB`, etc.) for
+        // smoke tests and external probes while also exposing structured
+        // process/container accounting for OOM diagnosis.
         memory: {
-          rssMiB: Math.round(memory.rss / 1024 / 1024),
-          heapUsedMiB: Math.round(memory.heapUsed / 1024 / 1024),
-          heapTotalMiB: Math.round(memory.heapTotal / 1024 / 1024),
-          externalMiB: Math.round(memory.external / 1024 / 1024),
-          arrayBuffersMiB: Math.round(memory.arrayBuffers / 1024 / 1024),
+          ...snapshot.process,
+          process: snapshot.process,
+          container: snapshot.container,
         },
       };
 
